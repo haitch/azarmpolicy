@@ -1,4 +1,4 @@
-module github.com/haitch/az-client-policy
+module github.com/haitch/azarmpolicy
 
 go 1.18
 
