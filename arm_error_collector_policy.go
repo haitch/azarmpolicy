@@ -21,6 +21,7 @@ type armErrorResponse struct {
 }
 
 // ArmRequestMetricCollector is a interface that collectors need to implement.
+// TODO: use *policy.Request or *http.Request?
 type ArmRequestMetricCollector interface {
 	// RequestStarted is called when a request is about to be sent.
 	// context is not provided, get it from Request.Context()
@@ -69,7 +70,9 @@ func (p *ArmRequestMetricPolicy) Do(req *policy.Request) (*http.Response, error)
 		} else {
 			p.requestFailed(req.Raw(), resp, &ArmError{Code: "NotAnArmError", Message: "Response body is not in ARM error form: {error:{code, message}}"})
 		}
-		return resp, respErr
+
+		// just an observer, caller/client have responder to handle application error.
+		return resp, nil
 	}
 
 	p.requestCompleted(req.Raw(), resp)

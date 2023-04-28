@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"testing"
 
+	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/arm"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/policy"
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore/to"
@@ -23,25 +25,43 @@ func TestArmRequestMetrics(t *testing.T) {
 	token, err := azidentity.NewClientSecretCredential(testInfo.TenantID, testInfo.SPNClientID, testInfo.SPNClientSecret, nil)
 	assert.NoError(t, err)
 
-	myPolicy := &ArmRequestMetricPolicy{} // TODO add collector and able to assert on it.
+	myPolicy := &ArmRequestMetricPolicy{
+		Collector: &myCollector{},
+	}
 	clientOptions := &arm.ClientOptions{
 		ClientOptions: policy.ClientOptions{
 			PerCallPolicies: []policy.Policy{myPolicy},
 		},
 		DisableRPRegistration: true,
 	}
-	client, err := armcontainerservice.NewManagedClustersClient(testInfo.SPNClientSecret, token, clientOptions)
+	client, err := armcontainerservice.NewManagedClustersClient("notexistingSub", token, clientOptions)
 	assert.NoError(t, err)
 
-	poller, err := client.BeginCreateOrUpdate(context.Background(), "test", "test", armcontainerservice.ManagedCluster{Location: to.Ptr("eastus")}, nil)
-	assert.NoError(t, err)
+	_, err = client.BeginCreateOrUpdate(context.Background(), "test", "test", armcontainerservice.ManagedCluster{Location: to.Ptr("eastus")}, nil)
+	// here the error is parsed from response body twice
+	// 1. by ArmRequestMetricPolicy, parse and log, and throw away.
+	// 2. by generated client function: runtime.HasStatusCode, and return to here.
+	assert.Error(t, err)
 
-	result, err := poller.Result(context.Background())
-	if err != nil {
-		panic(err)
-	}
+	respErr := &azcore.ResponseError{}
+	assert.True(t, errors.As(err, &respErr))
+	assert.Equal(t, respErr.ErrorCode, "InvalidSubscriptionId")
+}
 
-	fmt.Println(result)
+var _ ArmRequestMetricCollector = &myCollector{}
+
+type myCollector struct{}
+
+func (c *myCollector) RequestStarted(req *http.Request) {
+	fmt.Printf("RequestStarted, %s\n", req.URL)
+}
+
+func (c *myCollector) RequestCompleted(req *http.Request, resp *http.Response) {
+	fmt.Printf("RequestCompleted %s, %d\n", req.URL, resp.StatusCode)
+}
+
+func (c *myCollector) RequestFailed(req *http.Request, resp *http.Response, armErr *ArmError) {
+	fmt.Printf("RequestCompleted %s, %d, %s\n", req.URL, resp.StatusCode, armErr.Code)
 }
 
 type aadInfo struct {
