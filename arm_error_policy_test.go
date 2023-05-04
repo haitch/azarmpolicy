@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http"
 	"os"
 	"testing"
 
@@ -26,7 +25,7 @@ func TestArmRequestMetrics(t *testing.T) {
 	assert.NoError(t, err)
 
 	myPolicy := &ArmRequestMetricPolicy{
-		Collector: &myCollector{},
+		Collector: &myCollector{logger: t},
 	}
 	clientOptions := &arm.ClientOptions{
 		ClientOptions: policy.ClientOptions{
@@ -50,18 +49,28 @@ func TestArmRequestMetrics(t *testing.T) {
 
 var _ ArmRequestMetricCollector = &myCollector{}
 
-type myCollector struct{}
-
-func (c *myCollector) RequestStarted(req *http.Request) {
-	fmt.Printf("RequestStarted, %s\n", req.URL)
+type logger interface {
+	Logf(format string, args ...interface{})
 }
 
-func (c *myCollector) RequestCompleted(req *http.Request, resp *http.Response) {
-	fmt.Printf("RequestCompleted %s, %d\n", req.URL, resp.StatusCode)
+type myCollector struct {
+	logger logger
 }
 
-func (c *myCollector) RequestFailed(req *http.Request, resp *http.Response, armErr *ArmError) {
-	fmt.Printf("RequestCompleted %s, %d, %s\n", req.URL, resp.StatusCode, armErr.Code)
+func (c *myCollector) RequestStarted(iReq *RequestInfo) {
+	c.logger.Logf("RequestStarted, on %s, URL=%s\n", c.formatResourceId(iReq.ArmResId), iReq.Request.URL)
+}
+
+func (c *myCollector) RequestCompleted(iReq *RequestInfo, iResp *ResponseInfo) {
+	c.logger.Logf("RequestFinished with %d, on %s, URL=%s\n", iResp.Response.StatusCode, c.formatResourceId(iReq.ArmResId), iReq.Request.URL)
+}
+
+func (c *myCollector) RequestFailed(iReq *RequestInfo, iResp *ResponseInfo) {
+	c.logger.Logf("RequestFailed with %d %s, on %s, URL=%s\n", iResp.Response.StatusCode, iResp.Error.Code, c.formatResourceId(iReq.ArmResId), iReq.Request.URL)
+}
+
+func (c *myCollector) formatResourceId(resId *arm.ResourceID) string {
+	return fmt.Sprintf("ResourceType=%s, subscription=%s, resourceGroup=%s", resId.ResourceType.String(), resId.SubscriptionID, resId.ResourceGroupName)
 }
 
 type aadInfo struct {
